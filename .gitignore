@@ -1,6 +1,9 @@
-*.class
+.idea
+*.ipr
+*.iml
+*.iws
 
-# Package Files #
-*.jar
-*.war
-*.ear
+.gradle
+out
+build
+

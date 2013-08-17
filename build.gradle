@@ -1,0 +1,36 @@
+apply plugin: 'idea'
+apply plugin: 'groovy'
+apply plugin: 'maven'
+
+final eclipseAether = '0.9.0.M3' // http://search.maven.org/#search%7Cgav%7C1%7Cg%3A%22org.eclipse.aether%22%20AND%20a%3A%22aether-impl%22
+
+defaultTasks 'clean', 'build', 'install'
+
+sourceCompatibility = 1.6
+group               = 'org.jfrog.aether'
+
+repositories { jcenter() }
+dependencies {
+    compile     'org.codehaus.groovy:groovy-all:2.1.6',
+                'org.gcontracts:gcontracts-core:1.2.12'
+    testCompile 'org.spockframework:spock-core:0.7-groovy-2.0'
+}
+
+clean { delete( "$rootDir/out" ) }
+
+println "> Running Gradle [${ project.gradle.gradleVersion }], Groovy [${ GroovySystem.version }], Java [${ System.getProperty( 'java.version' ) }]"
+println "> Building [${ project.group }:${ project.name }:${ project.version }]"
+task wrapper( type: Wrapper ) { gradleVersion = '1.7' }
+
+
+idea.project {
+    jdkName = '1.7'
+    ipr.withXml { provider -> provider.node.component.find { it.@name == 'VcsDirectoryMappings' }.mapping.@vcs = 'Git' }
+}
+
+idea.module {
+    downloadSources = true
+    downloadJavadoc = false
+    excludeDirs += file( 'out' )
+    excludeDirs += file( 'build' )
+}
