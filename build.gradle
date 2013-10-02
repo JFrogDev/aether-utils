@@ -2,7 +2,7 @@ apply plugin: 'idea'
 apply plugin: 'groovy'
 apply plugin: 'maven'
 
-defaultTasks 'clean', 'build', 'install'
+defaultTasks 'clean', 'build', 'install', 'sourceJar'
 
 sourceCompatibility = 1.6
 targetCompatibility = 1.6
@@ -35,6 +35,12 @@ idea.module {
     excludeDirs    += file( 'out' )
     excludeDirs    += file( 'build' )
 }
+
+
+task sourceJar(type: Jar) {
+        from sourceSets.main.allSource
+        classifier = 'sources'
+    }
 
 println "> Running Gradle [${ project.gradle.gradleVersion }], Groovy [${ GroovySystem.version }], Java [${ System.getProperty( 'java.version' ) }]"
 println "> Building [${ project.group }:${ project.name }:${ project.version }]"
