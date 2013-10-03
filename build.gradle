@@ -1,28 +1,38 @@
-apply plugin: 'idea'
-apply plugin: 'groovy'
-apply plugin: 'maven'
+['signing', 'groovy', 'idea', 'maven-publish'].each {
+    apply plugin: it
+}
 
-defaultTasks 'clean', 'build', 'install', 'sourceJar'
+//should run `gradlew clean gPFFJP pP publish`
 
-sourceCompatibility = 1.6
-targetCompatibility = 1.6
-group               = 'org.jfrog.aether'
+/*should have the following in user-local gradle.properties:
+
+sonatypeUsername=
+sonatypePassword=
+signing.keyId=
+signing.password=
+signing.secretKeyRingFile=
+ */
+
+group = 'org.jfrog.aether'
 
 repositories { jcenter() }
 dependencies {
-    compile     'org.codehaus.groovy:groovy-all:2.1.6',
-                'org.apache.maven:maven-core:3.1.0',
-                'plexus:plexus-container-default:1.0-alpha-6',
-                'org.gcontracts:gcontracts-core:1.2.12',
-                'org.sonatype.aether:aether-api:1.13.1',
-                'org.sonatype.aether:aether-util:1.13.1',
-                'org.eclipse.aether:aether-api:0.9.0.M3',
-                'org.eclipse.aether:aether-util:0.9.0.M3'
+    compile 'org.codehaus.groovy:groovy-all:2.1.6',
+            'org.apache.maven:maven-core:3.1.0',
+            'plexus:plexus-container-default:1.0-alpha-6',
+            'org.gcontracts:gcontracts-core:1.2.12',
+            'org.sonatype.aether:aether-api:1.13.1',
+            'org.sonatype.aether:aether-util:1.13.1',
+            'org.eclipse.aether:aether-api:0.9.0.M3',
+            'org.eclipse.aether:aether-util:0.9.0.M3'
 
     testCompile 'org.spockframework:spock-core:0.7-groovy-2.0'
 }
 
-clean { delete( "$rootDir/out" ) }
+sourceCompatibility = 1.6
+targetCompatibility = 1.6
+
+clean { delete("$rootDir/out") }
 
 idea.project {
     jdkName = '1.7'
@@ -32,16 +42,138 @@ idea.project {
 idea.module {
     downloadSources = true
     downloadJavadoc = false
-    excludeDirs    += file( 'out' )
-    excludeDirs    += file( 'build' )
+    excludeDirs += file('out')
+    excludeDirs += file('build')
 }
 
+println "> Running Gradle [${project.gradle.gradleVersion}], Groovy [${GroovySystem.version}], Java [${System.getProperty('java.version')}]"
+println "> Building [${project.group}:${project.name}:${project.version}]"
+task wrapper(type: Wrapper) { gradleVersion = '1.7' }
 
+// javadoc.jar generation
+task javadocJar(type: Jar, dependsOn: javadoc) { // (1)
+    classifier = 'javadoc'
+    from javadoc.destinationDir
+}
+// sources.jar generation
 task sourceJar(type: Jar) {
-        from sourceSets.main.allSource
-        classifier = 'sources'
-    }
+    classifier = 'sources'
+    from sourceSets.main.allSource
+}
 
-println "> Running Gradle [${ project.gradle.gradleVersion }], Groovy [${ GroovySystem.version }], Java [${ System.getProperty( 'java.version' ) }]"
-println "> Building [${ project.group }:${ project.name }:${ project.version }]"
-task wrapper( type: Wrapper ) { gradleVersion = '1.7' }
+ext {
+    pomFilePath = "${project.buildDir}/tmp/pom.xml"
+    pomFile = file(pomFilePath)
+    projectUrl = 'https://github.com/JFrogDev/aether-utils'
+    scmUrl = 'https://github.com/JFrogDev/aether-utils.git'
+    connectionUrl = 'git@github.com:JFrogDev/aether-utils.git'
+    developerConnectionUrl = 'git@github.com:JFrogDev/aether-utils.git'
+}
+// add configuration for pom signing
+configurations {
+    pom
+}
+// summarize artifacts
+artifacts {
+    archives jar
+    archives sourceJar
+    archives javadocJar
+    pom pomFile
+}
+// sign all artifacts
+task signJars(type: Sign, dependsOn: [jar, javadocJar, sourceJar]) {
+    sign configurations.archives
+}
+
+// sign pom
+task signPom(type: Sign) {
+    sign configurations.pom
+}
+
+// extract pom signature
+def getPomSignature = {
+    return project.tasks.signPom.signatureFiles.collect { it }[0]
+}
+
+// defining which tasks should be called
+task preparePublication(dependsOn: [signJars, signPom])
+
+// extract signatures and add classifier and extension to them
+def getSignatureFiles = {
+    def allFiles = project.tasks.signJars.signatureFiles.collect { it }
+    def signedSources = allFiles.find { it.name.contains('-sources') }
+    def signedJavadoc = allFiles.find { it.name.contains('-javadoc') }
+    def signedJar = (allFiles - [signedSources, signedJavadoc])[0]
+    return [
+            [archive: signedSources, classifier: 'sources', extension: 'jar.asc'],
+            [archive: signedJavadoc, classifier: 'javadoc', extension: 'jar.asc'],
+            [archive: signedJar, classifier: null, extension: 'jar.asc']
+    ]
+}
+
+publishing {
+    publications {
+        gpgJars(MavenPublication) {
+            getSignatureFiles().each { signature ->
+                artifact(signature.archive) {
+                    classifier = signature.classifier
+                    extension = signature.extension
+                }
+            }
+        }
+        gpgPom(MavenPublication) {
+            artifact(getPomSignature()) {
+                classifier = null
+                extension = 'pom.asc'
+            }
+        }
+        jar(MavenPublication) {
+            from components.java
+            artifact sourceJar {
+                            classifier "sources"
+                        }
+            artifact javadocJar {
+                            classifier "javadoc"
+                        }
+            pom.withXml {
+                asNode().children().last() + {
+                    resolveStrategy = DELEGATE_FIRST
+                    name 'Aether Utils'
+                    description 'Utils for bridging between Aether versions in Maven 3.0 and Maven 3.1'
+                    url projectUrl
+                    scm {
+                        url scmUrl
+                        connection connectionUrl
+                        developerConnection developerConnectionUrl
+                    }
+                    licenses {
+                        license {
+                            name 'The Apache Software License, Version 2.0'
+                            url 'http://www.apache.org/license/LICENSE-2.0.txt'
+                            distribution 'repo'
+                        }
+                    }
+                    developers {
+                        developer {
+                            id 'evgenyg'
+                            name 'Evgeny Goldin'
+                            email 'evgenyg@gmail.com'
+                        }
+                    }
+                }
+            }
+        }
+    }
+    generatePomFileForJarPublication {
+        destination = pomFilePath
+    }
+    repositories {
+        maven {
+            url 'https://oss.sonatype.org/service/local/staging/deploy/maven2/'
+            credentials {
+                username = sonatypeUsername
+                password = sonatypePassword
+            }
+        }
+    }
+}
